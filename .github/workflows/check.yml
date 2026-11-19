@@ -1,0 +1,56 @@
+name: Check dira lotteries
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # every 30 minutes (GitHub may delay it a bit)
+  workflow_dispatch:          # "Run workflow" button for a manual test
+    inputs:
+      force_report:
+        description: "Send a test notification with the current number"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write             # needed to save state.json back to the repo
+
+concurrency:
+  group: dira-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright
+        run: |
+          pip install playwright==1.48.0
+          python -m playwright install --with-deps chromium
+
+      - name: Check the site
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          FORCE_REPORT: ${{ inputs.force_report }}
+        run: python check_dira.py
+
+      - name: Save state
+        if: always()
+        run: |
+          git config user.name "dira-bot"
+          git config user.email "dira-bot@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || (git commit -m "update state" && git push)
+
+      - name: Upload screenshot (only if the number was not found)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshot
+          path: debug.png
+          if-no-files-found: ignore
